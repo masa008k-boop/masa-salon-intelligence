@@ -1,0 +1,9 @@
+{
+  "name": "MASA Salon Intelligence",
+  "short_name": "MASA",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#111827",
+  "icons": []
+}
