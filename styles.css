@@ -15,3 +15,8 @@ button,.file-button{border:0;border-radius:10px;padding:10px 13px;background:var
 .badge{font-size:11px;background:#edf0f3;border-radius:999px;padding:3px 7px}.schedule-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;align-items:end;margin:8px 0}
 .master-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end;margin:8px 0}
 details{margin:10px 0}.file-button input{display:none}
+
+.edit-notice{margin-top:10px;padding:10px 12px;border:1px solid #cfd4da;background:#f8fafc;border-radius:10px;font-size:13px;font-weight:600}
+.row-actions{display:flex;gap:6px}
+.danger-text{color:#991b1b!important}
+@media(max-width:680px){.row-actions{flex-direction:column}.row-actions button{width:100%}}

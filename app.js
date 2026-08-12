@@ -20,6 +20,7 @@
   };
 
   let state = loadState();
+  let editingEntryId = null;
 
   function loadState() {
     try {
@@ -137,27 +138,70 @@
       alert("来店時間・メニュー・滞在時間を確認してください。");
       return;
     }
-    currentDay().entries.push({
-      id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
-      staffId: $("staffSelect").value,
-      arrival,
-      menuName: menu.name,
-      menuId: menu.id,
-      price,
-      minutes: mins
-    });
+    const payload = { staffId: $("staffSelect").value, arrival, menuName: menu.name, menuId: menu.id, price, minutes: mins };
+
+    if (editingEntryId) {
+      const d = currentDay();
+      const idx = d.entries.findIndex(e => e.id === editingEntryId);
+      if (idx >= 0) d.entries[idx] = { ...d.entries[idx], ...payload };
+      editingEntryId = null;
+    } else {
+      currentDay().entries.push({
+        id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+        ...payload
+      });
+    }
     saveState();
+    clearEntryForm();
     renderAll();
+  }
+
+  function editEntry(id) {
+    const entry = currentDay().entries.find(e => e.id === id);
+    if (!entry) return;
+    editingEntryId = id;
+    $("staffSelect").value = entry.staffId;
+    $("arrivalTime").value = entry.arrival;
+    const matchingMenu = state.menus.find(m => m.id === entry.menuId);
+    if (matchingMenu) $("menuSelect").value = matchingMenu.id;
+    else {
+      $("menuSelect").value = "";
+      alert("この実績のメニューは現在のメニューマスターにありません。メニューを選び直してください。");
+    }
+    $("actualPrice").value = entry.price;
+    $("stayMinutes").value = entry.minutes;
+    previewEnd();
+    updateEditUi();
+  }
+
+  function cancelEdit() {
+    editingEntryId = null;
+    clearEntryForm();
+    updateEditUi();
+  }
+
+  function clearEntryForm() {
     $("menuSelect").value = "";
     $("actualPrice").value = "";
     $("stayMinutes").value = "";
     $("endTime").value = "";
+    $("autoFillStatus").textContent = "メニューを選ぶと標準価格と標準時間が自動入力されます。";
+  }
+
+  function updateEditUi() {
+    const editing = Boolean(editingEntryId);
+    $("editNotice").hidden = !editing;
+    $("cancelEditBtn").hidden = !editing;
+    $("addEntryBtn").textContent = editing ? "修正を保存" : "登録";
   }
 
   function removeEntry(id) {
+    if (!confirm("この入力を削除しますか？")) return;
     const d = currentDay();
     d.entries = d.entries.filter(e => e.id !== id);
+    if (editingEntryId === id) editingEntryId = null;
     saveState();
+    updateEditUi();
     renderAll();
   }
 
@@ -189,10 +233,11 @@
         <td>${escapeHtml(e.menuName)}</td>
         <td>${e.minutes}分</td>
         <td>${yen(e.price)}</td>
-        <td><button class="secondary" data-delete="${e.id}">削除</button></td>
+        <td><div class="row-actions"><button class="secondary" data-edit="${e.id}">修正</button><button class="secondary danger-text" data-delete="${e.id}">削除</button></div></td>
       </tr>`;
     }).join("");
 
+    document.querySelectorAll("[data-edit]").forEach(btn => btn.addEventListener("click", () => editEntry(btn.dataset.edit)));
     document.querySelectorAll("[data-delete]").forEach(btn => btn.addEventListener("click", () => removeEntry(btn.dataset.delete)));
 
     const sales = entries.reduce((sum,e) => sum + Number(e.price || 0), 0);
@@ -220,10 +265,10 @@
       <button class="secondary" data-menu-remove="${i}">削除</button></div>`).join("");
 
     document.querySelectorAll("[data-staff-remove]").forEach(btn => btn.addEventListener("click", () => {
-      state.staff.splice(Number(btn.dataset.staffRemove), 1); renderMasters();
+      if (confirm("このスタッフをマスターから削除しますか？ 過去実績は残ります。")) { state.staff.splice(Number(btn.dataset.staffRemove), 1); renderMasters(); }
     }));
     document.querySelectorAll("[data-menu-remove]").forEach(btn => btn.addEventListener("click", () => {
-      state.menus.splice(Number(btn.dataset.menuRemove), 1); renderMasters();
+      if (confirm("このメニューをマスターから削除しますか？ 過去実績は残ります。")) { state.menus.splice(Number(btn.dataset.menuRemove), 1); renderMasters(); }
     }));
   }
 
@@ -313,6 +358,7 @@
     renderWorkSchedule();
     renderMasters();
     renderEntriesAndKpis();
+    updateEditUi();
   }
 
   function escapeHtml(s) {
@@ -321,13 +367,14 @@
   function escapeAttr(s) { return escapeHtml(s); }
 
   $("workDate").value = todayLocal();
-  $("workDate").addEventListener("change", renderAll);
+  $("workDate").addEventListener("change", () => { editingEntryId = null; clearEntryForm(); renderAll(); });
   $("saveDayBtn").addEventListener("click", saveDaySettings);
   $("menuSelect").addEventListener("change", menuChanged);
   $("arrivalTime").addEventListener("input", previewEnd);
   $("stayMinutes").addEventListener("input", previewEnd);
   $("addEntryBtn").addEventListener("click", addEntry);
-  $("clearEntryBtn").addEventListener("click", () => { $("menuSelect").value=""; $("actualPrice").value=""; $("stayMinutes").value=""; $("endTime").value=""; });
+  $("clearEntryBtn").addEventListener("click", () => { editingEntryId = null; clearEntryForm(); updateEditUi(); });
+  $("cancelEditBtn").addEventListener("click", cancelEdit);
   $("addStaffBtn").addEventListener("click", addStaff);
   $("addMenuBtn").addEventListener("click", addMenu);
   $("saveMasterBtn").addEventListener("click", saveMasters);

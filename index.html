@@ -12,7 +12,7 @@
   <header class="topbar">
     <div>
       <h1>MASA Salon Intelligence</h1>
-      <p>正式運用テスト版 v0.1</p>
+      <p>正式運用テスト版 v0.2</p>
     </div>
   </header>
 
@@ -38,8 +38,10 @@
         <label>滞在時間（分）<input id="stayMinutes" type="number" min="1" step="10"></label>
         <label>終了予定<input id="endTime" readonly></label>
       </div>
+      <div id="editNotice" class="edit-notice" hidden>入力一覧のデータを修正中です。</div>
       <div class="actions">
         <button id="addEntryBtn">登録</button>
+        <button id="cancelEditBtn" class="secondary" hidden>修正をやめる</button>
         <button id="clearEntryBtn" class="secondary">入力クリア</button>
       </div>
       <p id="autoFillStatus" class="hint">メニューを選ぶと標準価格と標準時間が自動入力されます。</p>
@@ -62,7 +64,7 @@
       <h2>入力一覧 <span class="badge">来店時間順</span></h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>時間</th><th>担当</th><th>メニュー</th><th>滞在</th><th>売上</th><th></th></tr></thead>
+          <thead><tr><th>時間</th><th>担当</th><th>メニュー</th><th>滞在</th><th>売上</th><th>操作</th></tr></thead>
           <tbody id="entryRows"></tbody>
         </table>
       </div>
@@ -81,7 +83,7 @@
         <button id="addMenuBtn" class="secondary">メニュー追加</button>
       </details>
       <div class="actions"><button id="saveMasterBtn">管理設定を保存</button></div>
-      <p class="hint">マスター変更後も過去実績は書き換えません。</p>
+      <p class="hint">マスター変更後も過去実績は書き換えません。スタッフやメニューを削除しても、過去の入力データは残ります。</p>
     </section>
 
     <section class="card">
