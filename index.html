@@ -24,7 +24,11 @@
         <label>店販売上（税込・1日合計）<input id="retailSales" type="number" min="0" value="0"></label>
       </div>
       <div id="workSchedule"></div>
-      <button id="saveDayBtn">営業設定を保存</button>
+      <p id="businessStatus" class="hint"></p>
+      <div class="actions">
+        <button id="saveDayBtn">営業設定を保存</button>
+        <button id="closeDayBtn" class="secondary danger-text">休業日として保存</button>
+      </div>
       <p class="hint">稼働率の分母は、出勤スタッフそれぞれの実勤務時間の合計です。固定休憩は差し引きません。</p>
     </section>
 
@@ -56,6 +60,7 @@
         <div class="kpi"><strong id="kpiUtil">0%</strong><span>店全体稼働率</span></div>
         <div class="kpi"><strong id="kpiHourly">¥0</strong><span>滞在時間あたり技術売上</span></div>
         <div class="kpi"><strong id="kpiRetail">¥0</strong><span>店販売上</span></div>
+        <div class="kpi"><strong id="kpiTotalSales">¥0</strong><span>総売上</span></div>
       </div>
       <p id="utilFormula" class="hint"></p>
     </section>
