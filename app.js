@@ -2,7 +2,9 @@
 (() => {
   const STORAGE_KEY = "masa_salon_intelligence_prod_v1";
   const CURRENT_DATA_VERSION = 2;
-  const MENU_CATEGORIES = ["カット", "カラー", "パーマ", "トリートメント", "ヘアリセッター", "その他"];
+  const MENU_CATEGORIES = ["カット", "カラー", "パーマ", "縮毛矯正", "トリートメント", "ヘッドスパ", "セット・その他"];
+  // Keep existing group order independent of the editable category suggestions.
+  const MENU_CATEGORY_ORDER = ["カット", "カラー", "パーマ", "トリートメント", "ヘアリセッター", "その他"];
   const $ = (id) => document.getElementById(id);
 
   const DEFAULT_STATE = {
@@ -117,7 +119,7 @@
   }
 
   function menuGroups(menus) {
-    const categories = [...new Set([...MENU_CATEGORIES, ...menus.map(menuCategory).filter(Boolean), ""])];
+    const categories = [...new Set([...MENU_CATEGORY_ORDER, ...menus.map(menuCategory).filter(Boolean), ""])];
     return categories.map(category => ({ category, menus: menus.filter(menu => menuCategory(menu) === category) }))
       .filter(group => group.menus.length);
   }
@@ -481,8 +483,7 @@ function cancelInlineEdit() {
   }
 
   function renderMenuMaster() {
-    const categories = [...new Set([...MENU_CATEGORIES, ...menuDrafts.map(menuCategory).filter(Boolean)])];
-    $("menuMaster").innerHTML = `<datalist id="menuCategoryChoices">${categories.map(category =>
+    $("menuMaster").innerHTML = `<datalist id="menuCategoryChoices">${MENU_CATEGORIES.map(category =>
       `<option value="${escapeAttr(category)}"></option>`).join("")}</datalist>` +
       menuGroups(menuDrafts).map(group => `<section class="menu-group"><h3>${escapeHtml(group.category || "未分類")}</h3>${group.menus.map((menu, index) =>
         `<div class="menu-master-row" data-menu-row="${escapeAttr(menu.id)}">
