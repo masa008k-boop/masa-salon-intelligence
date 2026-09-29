@@ -2,6 +2,7 @@
 (() => {
   const STORAGE_KEY = "masa_salon_intelligence_prod_v1";
   const CURRENT_DATA_VERSION = 2;
+  const MENU_CATEGORIES = ["カット", "カラー", "パーマ", "トリートメント", "ヘアリセッター", "その他"];
   const $ = (id) => document.getElementById(id);
 
   const DEFAULT_STATE = {
@@ -23,6 +24,7 @@
   let saveBlockedReason = "";
   let state = loadState();
   let editingEntryId = null;
+  let menuDrafts = [];
 
   function loadState() {
     try {
@@ -110,10 +112,38 @@
   });
 }
 
+  function menuCategory(menu) {
+    return typeof menu.category === "string" ? menu.category.trim() : "";
+  }
+
+  function menuGroups(menus) {
+    const categories = [...new Set([...MENU_CATEGORIES, ...menus.map(menuCategory).filter(Boolean), ""])];
+    return categories.map(category => ({ category, menus: menus.filter(menu => menuCategory(menu) === category) }))
+      .filter(group => group.menus.length);
+  }
+
+  function menuOptionsHtml(selectedId) {
+    return menuGroups(state.menus).map(group =>
+      `<optgroup label="${escapeAttr(group.category || "未分類")}">${group.menus.map(menu =>
+        `<option value="${escapeAttr(menu.id)}" ${menu.id === selectedId ? "selected" : ""}>${escapeHtml(menu.name)}</option>`
+      ).join("")}</optgroup>`
+    ).join("");
+  }
+
+  function refreshMenuSelectors() {
+    const selectedId = $("menuSelect").value;
+    $("menuSelect").innerHTML = `<option value="">選択してください</option>` + menuOptionsHtml(selectedId);
+    document.querySelectorAll("[data-inline-menu]").forEach(select => {
+      const id = select.value;
+      const missingOption = state.menus.some(menu => menu.id === id) ? "" :
+        `<option value="${escapeAttr(id)}" selected>${escapeHtml(select.selectedOptions[0]?.textContent || "—")}</option>`;
+      select.innerHTML = missingOption + menuOptionsHtml(id);
+    });
+  }
+
  function refreshSelectors() {
     $("staffSelect").innerHTML =activeStaffToday().map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
-    $("menuSelect").innerHTML = `<option value="">選択してください</option>` +
-      state.menus.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join("");
+    refreshMenuSelectors();
   }
 
   function renderWorkSchedule() {
@@ -236,9 +266,7 @@ function editEntry(id) {
   const currentMenu = state.menus.find(m => m.id === entry.menuId);
   const unavailableMenuOption = currentMenu ? "" :
     `<option value="${escapeAttr(entry.menuId)}" selected>${escapeHtml(entry.menuName)}</option>`;
-  const menuOptions = unavailableMenuOption + state.menus.map(m =>
-    `<option value="${escapeAttr(m.id)}" ${m.id === entry.menuId ? "selected" : ""}>${escapeHtml(m.name)}</option>`
-  ).join("");
+  const menuOptions = unavailableMenuOption + menuOptionsHtml(entry.menuId);
 
   row.innerHTML = `
     <td>
@@ -444,30 +472,80 @@ function cancelInlineEdit() {
       <label>スタッフ名<input data-staff-name="${i}" value="${escapeAttr(s.name)}"></label><span></span><span></span>
       <button class="secondary" data-staff-remove="${i}">削除</button></div>`).join("");
 
-    $("menuMaster").innerHTML = state.menus.map((m,i) => `<div class="master-row">
-      <label>メニュー名<input data-menu-name="${i}" value="${escapeAttr(m.name)}"></label>
-      <label>税込価格<input type="number" data-menu-price="${i}" value="${m.price}"></label>
-      <label>標準時間<input type="number" data-menu-minutes="${i}" value="${m.minutes}"></label>
-      <button class="secondary" data-menu-remove="${i}">削除</button></div>`).join("");
+    menuDrafts = state.menus.map(menu => ({ ...menu }));
+    renderMenuMaster();
 
     document.querySelectorAll("[data-staff-remove]").forEach(btn => btn.addEventListener("click", () => {
       if (confirm("このスタッフをマスターから削除しますか？ 過去実績は残ります。")) { state.staff.splice(Number(btn.dataset.staffRemove), 1); renderMasters(); }
     }));
-    document.querySelectorAll("[data-menu-remove]").forEach(btn => btn.addEventListener("click", () => {
-      if (confirm("このメニューをマスターから削除しますか？ 過去実績は残ります。")) { state.menus.splice(Number(btn.dataset.menuRemove), 1); renderMasters(); }
-    }));
+  }
+
+  function renderMenuMaster() {
+    const categories = [...new Set([...MENU_CATEGORIES, ...menuDrafts.map(menuCategory).filter(Boolean)])];
+    $("menuMaster").innerHTML = `<datalist id="menuCategoryChoices">${categories.map(category =>
+      `<option value="${escapeAttr(category)}"></option>`).join("")}</datalist>` +
+      menuGroups(menuDrafts).map(group => `<section class="menu-group"><h3>${escapeHtml(group.category || "未分類")}</h3>${group.menus.map((menu, index) =>
+        `<div class="menu-master-row" data-menu-row="${escapeAttr(menu.id)}">
+          <label>メニュー名<input data-menu-field="name" value="${escapeAttr(menu.name)}"></label>
+          <label>税込価格<input type="number" data-menu-field="price" value="${escapeAttr(menu.price)}"></label>
+          <label>標準時間<input type="number" data-menu-field="minutes" value="${escapeAttr(menu.minutes)}"></label>
+          <label>カテゴリー<input data-menu-field="category" list="menuCategoryChoices" placeholder="未分類" value="${escapeAttr(menuCategory(menu))}"></label>
+          <div class="menu-actions">
+            <button class="secondary" data-menu-move="-1" aria-label="上へ移動" ${index === 0 ? "disabled" : ""}>↑</button>
+            <button class="secondary" data-menu-move="1" aria-label="下へ移動" ${index === group.menus.length - 1 ? "disabled" : ""}>↓</button>
+            <button class="secondary danger-text" data-menu-remove>削除</button>
+          </div>
+        </div>`).join("")}</section>`).join("");
+    $("menuMaster").querySelectorAll("[data-menu-row]").forEach(row => {
+      const menu = menuDrafts.find(item => item.id === row.dataset.menuRow);
+      row.querySelectorAll("[data-menu-field]").forEach(input => {
+        input.addEventListener("input", () => {
+          const field = input.dataset.menuField;
+          if (field === "category") {
+            const category = input.value.trim();
+            if (category) menu.category = category;
+            else delete menu.category;
+            updateMenuMoveButtons();
+          } else menu[field] = input.value;
+        });
+      });
+      row.querySelectorAll("[data-menu-move]").forEach(button => button.addEventListener("click", () => {
+        // Resolve neighbours from the current draft, including any category edits.
+        const peers = menuDrafts.filter(item => menuCategory(item) === menuCategory(menu));
+        const neighbour = peers[peers.indexOf(menu) + Number(button.dataset.menuMove)];
+        if (neighbour) {
+          const from = menuDrafts.indexOf(menu), to = menuDrafts.indexOf(neighbour);
+          [menuDrafts[from], menuDrafts[to]] = [menuDrafts[to], menuDrafts[from]];
+        }
+        renderMenuMaster();
+      }));
+      row.querySelector("[data-menu-remove]").addEventListener("click", () => {
+        if (!confirm("このメニューをマスターから削除しますか？ 過去実績は残ります。")) return;
+        menuDrafts = menuDrafts.filter(item => item !== menu);
+        renderMenuMaster();
+      });
+    });
+  }
+
+  function updateMenuMoveButtons() {
+    $("menuMaster").querySelectorAll("[data-menu-row]").forEach(row => {
+      const menu = menuDrafts.find(item => item.id === row.dataset.menuRow);
+      const peers = menuDrafts.filter(item => menuCategory(item) === menuCategory(menu));
+      row.querySelectorAll("[data-menu-move]").forEach(button => {
+        button.disabled = !peers[peers.indexOf(menu) + Number(button.dataset.menuMove)];
+      });
+    });
   }
 
   function saveMasters() {
     document.querySelectorAll("[data-staff-name]").forEach(el => state.staff[Number(el.dataset.staffName)].name = el.value.trim() || "スタッフ");
-    document.querySelectorAll("[data-menu-name]").forEach(el => state.menus[Number(el.dataset.menuName)].name = el.value.trim() || "メニュー");
-    document.querySelectorAll("[data-menu-price]").forEach(el => state.menus[Number(el.dataset.menuPrice)].price = Number(el.value) || 0);
-    document.querySelectorAll("[data-menu-minutes]").forEach(el => state.menus[Number(el.dataset.menuMinutes)].minutes = Number(el.value) || 0);
+    state.menus = menuDrafts.map(menu => ({ ...menu, name: menu.name.trim() || "メニュー",
+      price: Number(menu.price) || 0, minutes: Number(menu.minutes) || 0 }));
     if (!saveState()) return;
     refreshSelectors();
     renderWorkSchedule();
     renderMasters();
-    renderEntriesAndKpis();
+    if (!document.querySelector("[data-inline-id]")) renderEntriesAndKpis();
     alert("管理設定を保存しました。");
   }
 
@@ -477,8 +555,8 @@ function cancelInlineEdit() {
   }
 
   function addMenu() {
-    state.menus.push({ id: "menu_" + Date.now(), name: "新しいメニュー", price: 0, minutes: 60 });
-    renderMasters();
+    menuDrafts.push({ id: "menu_" + Date.now(), name: "新しいメニュー", price: 0, minutes: 60 });
+    renderMenuMaster();
   }
 
   function backupJson() {
@@ -517,6 +595,7 @@ function cancelInlineEdit() {
     if (x.version !== undefined && x.version !== 1 && x.version !== CURRENT_DATA_VERSION) throw new Error("unsupported version");
     if (!x.staff.every(s => isRecord(s) && hasStrings(s, ["id", "name"]))) throw new Error("invalid staff");
     if (!x.menus.every(m => isRecord(m) && hasStrings(m, ["id", "name"]) && hasNumbers(m, ["price", "minutes"]))) throw new Error("invalid menus");
+    if (!x.menus.every(m => !has(m, "category") || typeof m.category === "string")) throw new Error("invalid category");
     for (const day of Object.values(x.days)) {
       if (!isRecord(day) || !Array.isArray(day.work) || !Array.isArray(day.entries)) throw new Error("invalid day");
       if (has(day, "retailSales") && !Number.isFinite(day.retailSales)) throw new Error("invalid retail sales");
