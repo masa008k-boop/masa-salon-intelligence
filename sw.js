@@ -1,4 +1,4 @@
-const CACHE = 'masa-salon-menus-20260929';
+const CACHE = 'masa-salon-menu-candidates-20260929';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest'];
 const assetUrls = ASSETS.map(path => new URL(path, self.registration.scope).href);
 
@@ -10,7 +10,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    for (const oldCacheName of ['masa-salon-v1', 'masa-salon-phase1-20260925']) {
+    for (const oldCacheName of ['masa-salon-v1', 'masa-salon-phase1-20260925', 'masa-salon-menus-20260929']) {
       if (!(await caches.keys()).includes(oldCacheName)) continue;
       const oldCache = await caches.open(oldCacheName);
       // Cache Storage is shared by origin; preserve entries belonging to other apps.
