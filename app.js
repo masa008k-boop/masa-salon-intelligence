@@ -1,14 +1,17 @@
 
 (() => {
   const STORAGE_KEY = "masa_salon_intelligence_prod_v1";
-  const CURRENT_DATA_VERSION = 2;
+  const CURRENT_DATA_VERSION = 3;
+  const { itemsForEntry, validMenuItems } = MasaVisitData;
+  const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+  const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
   const MENU_CATEGORIES = ["カット", "カラー", "パーマ", "縮毛矯正", "トリートメント", "ヘッドスパ", "セット・その他"];
   // Keep existing group order independent of the editable category suggestions.
   const MENU_CATEGORY_ORDER = ["カット", "カラー", "パーマ", "トリートメント", "ヘアリセッター", "その他"];
   const $ = (id) => document.getElementById(id);
 
   const DEFAULT_STATE = {
-    version: CURRENT_DATA_VERSION,
+    version: 2,
     staff: [
       { id: "masa", name: "マサ" },
       { id: "staff_a", name: "スタッフA" },
@@ -34,27 +37,32 @@
       if (raw === null) return structuredClone(DEFAULT_STATE);
       const parsed = JSON.parse(raw);
       const version = parsed?.version;
-      if (version !== undefined && version !== 1 && version !== CURRENT_DATA_VERSION) {
+      if (version !== undefined && version !== 1 && version !== 2 && version !== CURRENT_DATA_VERSION) {
         saveBlockedReason = Number.isFinite(version) && version > CURRENT_DATA_VERSION
           ? `このデータは新しいversion ${version}です。対応版で開いてください。`
           : "対応していないデータversionです。";
       }
+      if (saveBlockedReason) return structuredClone(DEFAULT_STATE);
+      validateBackup(parsed);
       return parsed;
     } catch {
-      saveBlockedReason = "保存データのJSONを解析できません。元データ保護のため保存を停止しています。";
+      saveBlockedReason = "保存データのJSONまたは構造を確認できません。元データ保護のため保存を停止しています。";
       return JSON.parse(JSON.stringify(DEFAULT_STATE));
     }
   }
 
   function saveState() {
     const version = state?.version;
-    const unsupportedVersion = version !== undefined && version !== 1 && version !== CURRENT_DATA_VERSION;
+    const unsupportedVersion = version !== undefined && version !== 1 && version !== 2 && version !== CURRENT_DATA_VERSION;
     if (saveBlockedReason || unsupportedVersion) {
       alert(saveBlockedReason || "対応していないデータversionのため保存できません。");
       return false;
     }
-    state.version = CURRENT_DATA_VERSION;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const hasItems = Object.values(state.days).some(day => day.entries.some(entry => has(entry, "menuItems")));
+    const next = { ...state, version: state.version === 3 || hasItems ? 3 : 2 };
+    validateBackup(next);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    state = next;
     return true;
   }
 
@@ -133,13 +141,12 @@
   }
 
   function refreshMenuSelectors() {
-    const selectedId = $("menuSelect").value;
-    $("menuSelect").innerHTML = `<option value="">選択してください</option>` + menuOptionsHtml(selectedId);
-    document.querySelectorAll("[data-inline-menu]").forEach(select => {
+    document.querySelectorAll("[data-item-menu]").forEach(select => {
       const id = select.value;
-      const missingOption = state.menus.some(menu => menu.id === id) ? "" :
-        `<option value="${escapeAttr(id)}" selected>${escapeHtml(select.selectedOptions[0]?.textContent || "—")}</option>`;
-      select.innerHTML = missingOption + menuOptionsHtml(id);
+      const text = select.selectedOptions[0]?.textContent || "削除済みメニュー";
+      select.innerHTML = '<option value="">選択してください</option>' +
+        (id && !state.menus.some(menu => menu.id === id) ? '<option value="' + escapeAttr(id) + '" selected>' + escapeHtml(text) + '</option>' : '') + menuOptionsHtml(id);
+      select.value = id;
     });
   }
 
@@ -188,221 +195,125 @@
     renderAll();
   }
 
-  function menuChanged() {
-    const menu = state.menus.find(m => m.id === $("menuSelect").value);
-    if (!menu) {
-      $("actualPrice").value = "";
-      $("stayMinutes").value = "";
-      $("endTime").value = "";
-      $("autoFillStatus").textContent = "メニューを選ぶと標準価格と標準時間が自動入力されます。";
-      return;
-    }
-    $("actualPrice").value = menu.price;
-    $("stayMinutes").value = menu.minutes;
-    previewEnd();
-    $("autoFillStatus").textContent = `自動入力：${menu.name} / ${yen(menu.price)} / ${menu.minutes}分`;
+  let newEditor;
+  const inlineEditors = new Map();
+
+  function menuSnapshot(menu) {
+    return { menuId: menu.id, menuName: menu.name, standardPriceAtVisit: menu.price,
+      standardMinutesAtVisit: menu.minutes, categoryAtVisit: has(menu, "category") ? menu.category : "" };
   }
 
-  function previewEnd() {
-    const a = $("arrivalTime").value;
-    const mins = Number($("stayMinutes").value) || 0;
-    $("endTime").value = a && mins ? minToTime(timeToMin(a) + mins) : "";
-  }
-
-  function addEntry() {
-    if (!editingEntryId && businessStatusOf(currentDay()) === "closed") {
-      alert("休業日には来店実績を登録できません。先に営業設定を保存してください。");
-      return;
+  function createItemEditor(container, initial, changed) {
+    let items = initial.map(item => ({ ...item, id: item.id || uid() }));
+    const originals = new Map(items.map(item => [item.id, { ...item }]));
+    function totals() {
+      const selected = items.filter(item => item.menuId);
+      return { price: selected.reduce((sum, item) => sum + Number(item.price), 0),
+        minutes: selected.length && selected.every(item => has(item, "standardMinutesAtVisit"))
+          ? selected.reduce((sum, item) => sum + item.standardMinutesAtVisit, 0) : null };
     }
-    const staff = state.staff.find(s => s.id === $("staffSelect").value);
-    const menu = state.menus.find(m => m.id === $("menuSelect").value);
-    const mins = Number($("stayMinutes").value) || 0;
-    const price = Number($("actualPrice").value) || 0;
-    const arrival = $("arrivalTime").value;
-    if (!staff || !menu || !isValidArrival(arrival) || mins <= 0) {
-      alert("担当者・来店時間・メニュー・滞在時間を確認してください。");
-      return;
-    }
-    const payload = { staffId: staff.id, arrival, menuName: menu.name, menuId: menu.id, price, minutes: mins };
-
-    if (editingEntryId) {
-      const d = currentDay();
-      const idx = d.entries.findIndex(e => e.id === editingEntryId);
-      if (idx >= 0) {
-        const entry = d.entries[idx];
-        d.entries[idx] = { ...entry, ...payload };
-        if (entry.staffId !== staff.id) d.entries[idx].staffNameAtVisit = staff.name;
-        if (entry.menuId !== menu.id) d.entries[idx].standardPriceAtVisit = menu.price;
-      }
-      editingEntryId = null;
-    } else {
-      currentDay().entries.push({
-        id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
-        staffNameAtVisit: staff.name,
-        standardPriceAtVisit: menu.price,
-        ...payload
+    function draw() {
+      container.innerHTML = items.map(item => '<div class="visit-item">' +
+        '<label>メニュー<select data-item-menu><option value="">選択してください</option>' +
+        (item.menuId && !state.menus.some(menu => menu.id === item.menuId) ? '<option value="' + escapeAttr(item.menuId) + '" selected>' + escapeHtml(item.menuName) + '</option>' : '') + menuOptionsHtml(item.menuId) + '</select></label>' +
+        '<label>実売上（税込）<input data-item-price type="number" min="0" step="1" value="' + escapeAttr(item.price ?? '') + '"></label>' +
+        '<div class="hint">標準価格：' + (has(item, "standardPriceAtVisit") ? yen(item.standardPriceAtVisit) : '不明') + ' / 標準時間：' + (has(item, "standardMinutesAtVisit") ? item.standardMinutesAtVisit + '分' : '不明') + ' / ' + escapeHtml(has(item, "categoryAtVisit") ? item.categoryAtVisit || '未分類' : 'カテゴリー不明') + '</div>' +
+        '<button class="secondary" data-item-remove ' + (items.length === 1 ? 'disabled' : '') + '>メニュー削除</button></div>').join('');
+      [...container.children].forEach((row, index) => {
+        const item = items[index];
+        row.querySelector('[data-item-menu]').value = item.menuId || '';
+        row.querySelector('[data-item-menu]').addEventListener('change', event => {
+          const menu = state.menus.find(menu => menu.id === event.target.value);
+          const original = originals.get(item.id);
+          items[index] = original && original.menuId === event.target.value ? { ...original } :
+            menu ? { ...item, ...menuSnapshot(menu), price: menu.price } : { id: item.id, menuId: '', price: '' };
+          draw(); changed(totals(), true);
+        });
+        row.querySelector('[data-item-price]').addEventListener('input', event => { item.price = event.target.value; changed(totals(), false); });
+        row.querySelector('[data-item-remove]').addEventListener('click', () => { items.splice(index, 1); draw(); changed(totals(), true); });
       });
     }
-    if (!saveState()) return;
-    clearEntryForm();
-    renderAll();
+    draw();
+    return { add() { items.push({ id: uid(), menuId: '', price: '' }); draw(); changed(totals(), true); },
+      read() {
+        if (items.some(item => !item.menuId || item.price === '' || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) return null;
+        return items.map(item => ({ ...item, price: Number(item.price) }));
+      }, totals };
   }
 
-
-function editEntry(id) {
-  const editBtn = document.querySelector(`[data-edit="${id}"]`);
-  const row = editBtn?.closest("tr");
-  const entry = currentDay().entries.find(e => e.id === id);
-
-  if (!row || !entry) return;
-
-  row.dataset.inlineId = id;
-
-  const currentStaff = state.staff.find(s => s.id === entry.staffId);
-  const unavailableStaffOption = currentStaff ? "" :
-    `<option value="${escapeAttr(entry.staffId)}" selected>${Object.prototype.hasOwnProperty.call(entry, "staffNameAtVisit") ? escapeHtml(entry.staffNameAtVisit) : "—"}</option>`;
-  const staffOptions = unavailableStaffOption + state.staff.map(s =>
-    `<option value="${escapeAttr(s.id)}" ${s.id === entry.staffId ? "selected" : ""}>${escapeHtml(s.name)}</option>`
-  ).join("");
-
-  const currentMenu = state.menus.find(m => m.id === entry.menuId);
-  const unavailableMenuOption = currentMenu ? "" :
-    `<option value="${escapeAttr(entry.menuId)}" selected>${escapeHtml(entry.menuName)}</option>`;
-  const menuOptions = unavailableMenuOption + menuOptionsHtml(entry.menuId);
-
-  row.innerHTML = `
-    <td>
-      <input type="time" step="1800" data-inline-arrival="${id}" value="${entry.arrival}">
-      <div data-inline-end="${id}">
-        〜${minToTime(timeToMin(entry.arrival) + Number(entry.minutes))}
-      </div>
-    </td>
-    <td>
-      <select data-inline-staff="${id}">
-        ${staffOptions}
-      </select>
-    </td>
-    <td>
-      <select data-inline-menu="${id}">
-        ${menuOptions}
-      </select>
-      <div class="hint" data-inline-standard-price="${id}">標準価格：${Object.prototype.hasOwnProperty.call(entry, "standardPriceAtVisit") ? yen(entry.standardPriceAtVisit) : "—"}</div>
-    </td>
-    <td>
-      <input type="number" min="1" step="1"
-        data-inline-minutes="${id}" value="${entry.minutes}">分
-    </td>
-    <td>
-      <input type="number" min="0" step="1"
-        data-inline-price="${id}" value="${entry.price}">
-    </td>
-    <td>
-      <div class="row-actions">
-        <button class="secondary" data-inline-save="${id}">保存</button>
-        <button class="secondary" data-inline-cancel="${id}">キャンセル</button>
-      </div>
-    </td>
-  `;
-
-  const arrivalEl = row.querySelector(`[data-inline-arrival="${id}"]`);
-  const minutesEl = row.querySelector(`[data-inline-minutes="${id}"]`);
-  const endEl = row.querySelector(`[data-inline-end="${id}"]`);
-  const menuEl = row.querySelector(`[data-inline-menu="${id}"]`);
-
-  function refreshInlineEnd() {
-    const mins = Number(minutesEl.value) || 0;
-    endEl.textContent =
-      arrivalEl.value && mins > 0
-        ? `〜${minToTime(timeToMin(arrivalEl.value) + mins)}`
-        : "";
-  }
-
-  arrivalEl.addEventListener("input", refreshInlineEnd);
-  minutesEl.addEventListener("input", refreshInlineEnd);
-
-  menuEl.addEventListener("change", () => {
-    const menu = state.menus.find(m => m.id === menuEl.value);
-    const standardPrice = menuEl.value === entry.menuId
-      ? (Object.prototype.hasOwnProperty.call(entry, "standardPriceAtVisit") ? yen(entry.standardPriceAtVisit) : "—")
-      : (menu ? yen(menu.price) : "—");
-    row.querySelector(`[data-inline-standard-price="${id}"]`).textContent = `標準価格：${standardPrice}`;
-    if (!menu) return;
-
-    row.querySelector(`[data-inline-price="${id}"]`).value = menu.price;
-    minutesEl.value = menu.minutes;
-    refreshInlineEnd();
-  });
-
-  row.querySelector(`[data-inline-save="${id}"]`)
-    .addEventListener("click", () => saveInlineEntry(id));
-
-  row.querySelector(`[data-inline-cancel="${id}"]`)
-    .addEventListener("click", cancelInlineEdit);
-}
-
-function saveInlineEntry(id) {
-  const row = document.querySelector(`tr[data-inline-id="${id}"]`);
-  const d = currentDay();
-  const idx = d.entries.findIndex(e => e.id === id);
-
-  if (!row || idx < 0) return;
-
-  const arrival = row.querySelector(`[data-inline-arrival="${id}"]`).value;
-  const staffId = row.querySelector(`[data-inline-staff="${id}"]`).value;
-  const menuId = row.querySelector(`[data-inline-menu="${id}"]`).value;
-  const minutes = Number(row.querySelector(`[data-inline-minutes="${id}"]`).value) || 0;
-  const price = Number(row.querySelector(`[data-inline-price="${id}"]`).value) || 0;
-
-  const staff = state.staff.find(s => s.id === staffId);
-  const menu = state.menus.find(m => m.id === menuId);
-  const entry = d.entries[idx];
-  const hasMenuChanged = entry.menuId !== menuId;
-
-  if (!isValidArrival(arrival) || (hasMenuChanged && !menu) || minutes <= 0 || (entry.staffId !== staffId && !staff)) {
-    alert("担当者・来店時間・メニュー・滞在時間を確認してください。");
-    return;
-  }
-
-  d.entries[idx] = {
-    ...entry,
-    staffId,
-    arrival,
-    price,
-    minutes
-  };
-  if (entry.staffId !== staffId) d.entries[idx].staffNameAtVisit = staff.name;
-  if (hasMenuChanged) {
-    d.entries[idx].menuId = menu.id;
-    d.entries[idx].menuName = menu.name;
-    d.entries[idx].standardPriceAtVisit = menu.price;
-  }
-
-  if (!saveState()) return;
-  renderEntriesAndKpis();
-}
-
-function cancelInlineEdit() {
-  renderEntriesAndKpis();
-}  function cancelEdit() {
-    editingEntryId = null;
-    clearEntryForm();
-    updateEditUi();
-  }
-
+  let stayManuallyEdited = false;
   function clearEntryForm() {
-    $("menuSelect").value = "";
-    $("actualPrice").value = "";
-    $("stayMinutes").value = "";
-    $("endTime").value = "";
-    $("autoFillStatus").textContent = "メニューを選ぶと標準価格と標準時間が自動入力されます。";
+    stayManuallyEdited = false;
+    $("stayMinutes").value = '';
+    $("endTime").value = '';
+    newEditor = createItemEditor($("visitMenuItems"), [{ menuId: '', price: '' }], (totals, menuChanged) => {
+      $("visitTotal").textContent = yen(totals.price);
+      $("standardMinutesTotal").textContent = '標準時間合計：' + (totals.minutes === null ? '不明' : totals.minutes + '分');
+      if (menuChanged && !stayManuallyEdited) $("stayMinutes").value = totals.minutes ?? '';
+      previewEnd();
+    });
+    $("visitTotal").textContent = yen(0);
+    $("standardMinutesTotal").textContent = '標準時間合計：—';
   }
-
-  function updateEditUi() {
-    const editing = Boolean(editingEntryId);
-    $("editNotice").hidden = !editing;
-    $("cancelEditBtn").hidden = !editing;
-    $("addEntryBtn").textContent = editing ? "修正を保存" : "登録";
+  function previewEnd() {
+    const a = $("arrivalTime").value, mins = Number($("stayMinutes").value);
+    $("endTime").value = a && mins > 0 ? minToTime(timeToMin(a) + mins) : '';
   }
+  function addEntry() {
+    if (businessStatusOf(currentDay()) === 'closed') { alert('休業日には来店実績を登録できません。先に営業設定を保存してください。'); return; }
+    const staff = state.staff.find(s => s.id === $("staffSelect").value);
+    const menuItems = newEditor.read(), minutes = Number($("stayMinutes").value), arrival = $("arrivalTime").value;
+    if (!staff || !menuItems || !isValidArrival(arrival) || !Number.isFinite(minutes) || minutes <= 0) { alert('担当者・来店時間・メニュー・実売上・滞在時間を確認してください。'); return; }
+    const day = currentDay();
+    day.entries.push({ id: uid(), staffId: staff.id, staffNameAtVisit: staff.name, arrival, minutes,
+      price: menuItems.reduce((sum, item) => sum + item.price, 0), menuItems });
+    try { if (!saveState()) { day.entries.pop(); return; } } catch { day.entries.pop(); alert('保存できませんでした。'); return; }
+    clearEntryForm(); renderAll();
+  }
+  function editEntry(id) {
+    const row = [...document.querySelectorAll('[data-edit]')].find(button => button.dataset.edit === id)?.closest('tr');
+    const entry = currentDay().entries.find(entry => entry.id === id);
+    if (!row || !entry) return;
+    row.dataset.inlineId = id;
+    const staffOptions = (state.staff.some(staff => staff.id === entry.staffId) ? '' : '<option value="' + escapeAttr(entry.staffId) + '">' + escapeHtml(entry.staffNameAtVisit ?? '—') + '</option>') + state.staff.map(staff => '<option value="' + escapeAttr(staff.id) + '">' + escapeHtml(staff.name) + '</option>').join('');
+    row.innerHTML = '<td colspan="6" class="visit-edit"><div class="grid two"><label>担当者<select data-inline-staff>' + staffOptions + '</select></label><label>来店時間<input data-inline-arrival type="time" step="1800" value="' + escapeAttr(entry.arrival) + '"></label></div><div data-inline-items></div><button class="secondary" data-inline-add>メニュー追加</button><p data-inline-total></p><p class="hint" data-inline-standard></p><label>滞在時間（分）<input data-inline-minutes type="number" min="1" step="1" value="' + entry.minutes + '"></label><p data-inline-end></p><div class="actions"><button data-inline-save>保存</button><button class="secondary" data-inline-cancel>キャンセル</button></div></td>';
+    row.querySelector('[data-inline-staff]').value = entry.staffId;
+    const arrival = row.querySelector('[data-inline-arrival]'), minutes = row.querySelector('[data-inline-minutes]');
+    const end = () => { row.querySelector('[data-inline-end]').textContent = '終了予定：' + minToTime(timeToMin(arrival.value) + Number(minutes.value)); };
+    arrival.addEventListener('input', end); minutes.addEventListener('input', end); end();
+    const show = totals => {
+      row.querySelector('[data-inline-total]').textContent = '合計売上：' + yen(totals.price);
+      row.querySelector('[data-inline-standard]').textContent = '標準時間合計：' + (totals.minutes === null ? '不明' : totals.minutes + '分') + '（滞在時間は必要に応じて修正してください）';
+    };
+    const editor = createItemEditor(row.querySelector('[data-inline-items]'), itemsForEntry(entry), show);
+    inlineEditors.set(id, editor); show(editor.totals());
+    row.querySelector('[data-inline-add]').addEventListener('click', () => editor.add());
+    row.querySelector('[data-inline-save]').addEventListener('click', () => saveInlineEntry(id));
+    row.querySelector('[data-inline-cancel]').addEventListener('click', renderEntriesAndKpis);
+  }
+  function saveInlineEntry(id) {
+    const row = [...document.querySelectorAll('[data-inline-id]')].find(row => row.dataset.inlineId === id);
+    const day = currentDay(), index = day.entries.findIndex(entry => entry.id === id), entry = day.entries[index];
+    const items = inlineEditors.get(id)?.read();
+    if (!row || !entry) return;
+    const staffId = row.querySelector('[data-inline-staff]').value, staff = state.staff.find(staff => staff.id === staffId);
+    const arrival = row.querySelector('[data-inline-arrival]').value, minutes = Number(row.querySelector('[data-inline-minutes]').value);
+    if (!items || !isValidArrival(arrival) || !Number.isFinite(minutes) || minutes <= 0 || (entry.staffId !== staffId && !staff)) { alert('担当者・来店時間・メニュー・実売上・滞在時間を確認してください。'); return; }
+    const updated = { ...entry, staffId, arrival, minutes, price: items.reduce((sum, item) => sum + item.price, 0) };
+    if (entry.staffId !== staffId) updated.staffNameAtVisit = staff.name;
+    const fields = ['menuId', 'menuName', 'standardPriceAtVisit', 'standardMinutesAtVisit', 'categoryAtVisit'];
+    if (has(entry, 'menuItems') || items.length > 1) {
+      updated.menuItems = items;
+      for (const field of fields) delete updated[field];
+    } else {
+      for (const field of fields) { if (has(items[0], field)) updated[field] = items[0][field]; }
+    }
+    day.entries[index] = updated;
+    try { if (!saveState()) { day.entries[index] = entry; return; } } catch { day.entries[index] = entry; alert('保存できませんでした。'); return; }
+    renderEntriesAndKpis();
+  }
+  function cancelEdit() { clearEntryForm(); }
+  function updateEditUi() { $("editNotice").hidden = true; $("cancelEditBtn").hidden = true; }
 
   function removeEntry(id) {
     if (!confirm("この入力を削除しますか？")) return;
@@ -432,19 +343,17 @@ function cancelInlineEdit() {
   }
 
   function renderEntriesAndKpis() {
+    inlineEditors.clear();
     const d = currentDay();
     const entries = [...d.entries].sort((a,b) => timeToMin(a.arrival) - timeToMin(b.arrival));
     $("entryRows").innerHTML = entries.map(e => {
       const staffName = Object.prototype.hasOwnProperty.call(e, "staffNameAtVisit")
         ? e.staffNameAtVisit
         : state.staff.find(s => s.id === e.staffId)?.name || "—";
-      const standardPrice = Object.prototype.hasOwnProperty.call(e, "standardPriceAtVisit")
-        ? yen(e.standardPriceAtVisit)
-        : "—";
       return `<tr>
         <td>${e.arrival}〜${minToTime(timeToMin(e.arrival)+Number(e.minutes))}</td>
         <td>${escapeHtml(staffName)}</td>
-        <td>${escapeHtml(e.menuName)}<div class="hint">標準価格：${standardPrice}</div></td>
+        <td>${itemsForEntry(e).map(item => `${escapeHtml(item.menuName)}<div class="hint">標準価格：${has(item, "standardPriceAtVisit") ? yen(item.standardPriceAtVisit) : "不明"} / 実売上：${yen(item.price)}</div>`).join("")}</td>
         <td>${e.minutes}分</td>
         <td>${yen(e.price)}</td>
 
@@ -580,6 +489,7 @@ function cancelInlineEdit() {
       const parsed = JSON.parse(await file.text());
       validateBackup(parsed);
       if (!saveRestoredBackup(parsed)) return;
+      clearEntryForm();
       renderAll();
       alert("バックアップを復元しました。");
     } catch {
@@ -593,7 +503,7 @@ function cancelInlineEdit() {
     const hasNumbers = (value, fields) => fields.every(field => Number.isFinite(value[field]));
     const has = (value, field) => Object.prototype.hasOwnProperty.call(value, field);
     if (!isRecord(x) || !Array.isArray(x.staff) || !Array.isArray(x.menus) || !isRecord(x.days)) throw new Error("invalid");
-    if (x.version !== undefined && x.version !== 1 && x.version !== CURRENT_DATA_VERSION) throw new Error("unsupported version");
+    if (x.version !== undefined && x.version !== 1 && x.version !== 2 && x.version !== CURRENT_DATA_VERSION) throw new Error("unsupported version");
     if (!x.staff.every(s => isRecord(s) && hasStrings(s, ["id", "name"]))) throw new Error("invalid staff");
     if (!x.menus.every(m => isRecord(m) && hasStrings(m, ["id", "name"]) && hasNumbers(m, ["price", "minutes"]))) throw new Error("invalid menus");
     if (!x.menus.every(m => !has(m, "category") || typeof m.category === "string")) throw new Error("invalid category");
@@ -603,9 +513,12 @@ function cancelInlineEdit() {
       if (has(day, "businessStatus") && !["open", "closed", "unset"].includes(day.businessStatus)) throw new Error("invalid business status");
       if (!day.work.every(w => isRecord(w) && hasStrings(w, ["id", "start", "end"]) && typeof w.on === "boolean")) throw new Error("invalid work");
       if (!day.entries.every(e => isRecord(e)
-        && hasStrings(e, ["id", "staffId", "arrival", "menuId", "menuName"])
+        && hasStrings(e, ["id", "staffId", "arrival"])
+        && (has(e, "menuItems") ? x.version === 3 && validMenuItems(e) : hasStrings(e, ["menuId", "menuName"]))
         && hasNumbers(e, ["price", "minutes"])
         && (!has(e, "standardPriceAtVisit") || Number.isFinite(e.standardPriceAtVisit))
+        && (!has(e, "standardMinutesAtVisit") || (Number.isFinite(e.standardMinutesAtVisit) && e.standardMinutesAtVisit >= 0))
+        && (!has(e, "categoryAtVisit") || typeof e.categoryAtVisit === "string")
         && (!has(e, "staffNameAtVisit") || typeof e.staffNameAtVisit === "string"))) throw new Error("invalid entries");
     }
   }
@@ -629,6 +542,7 @@ function cancelInlineEdit() {
       validateBackup(parsed);
       if (!confirm("現在のデータを貼り付けたバックアップで置き換えますか？")) return;
       if (!saveRestoredBackup(parsed)) return;
+      clearEntryForm();
       renderAll();
       alert("復元しました。");
     } catch {
@@ -665,9 +579,9 @@ function cancelInlineEdit() {
   $("workDate").addEventListener("change", () => { editingEntryId = null; clearEntryForm(); renderAll(); });
   $("saveDayBtn").addEventListener("click", saveDaySettings);
   $("closeDayBtn").addEventListener("click", closeDay);
-  $("menuSelect").addEventListener("change", menuChanged);
+  $("addVisitMenuBtn").addEventListener("click", () => newEditor.add());
   $("arrivalTime").addEventListener("input", previewEnd);
-  $("stayMinutes").addEventListener("input", previewEnd);
+  $("stayMinutes").addEventListener("input", () => { stayManuallyEdited = true; previewEnd(); });
   $("addEntryBtn").addEventListener("click", addEntry);
   $("clearEntryBtn").addEventListener("click", () => { editingEntryId = null; clearEntryForm(); updateEditUi(); });
   $("cancelEditBtn").addEventListener("click", cancelEdit);
@@ -683,5 +597,6 @@ function cancelInlineEdit() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(()=>{});
   }
+  clearEntryForm();
   renderAll();
 })();

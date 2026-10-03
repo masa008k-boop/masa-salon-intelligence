@@ -37,9 +37,13 @@
       <div class="grid two">
         <label>担当者<select id="staffSelect"></select></label>
         <label>来店時間<input id="arrivalTime" type="time" step="1800" value="11:00"></label>
-        <label>メニュー<select id="menuSelect"></select></label>
-        <label>実売上（税込）<input id="actualPrice" type="number" min="0"></label>
-        <label>滞在時間（分）<input id="stayMinutes" type="number" min="1" step="10"></label>
+      </div>
+      <div id="visitMenuItems"></div>
+      <button id="addVisitMenuBtn" class="secondary">メニュー追加</button>
+      <p>合計売上：<strong id="visitTotal">¥0</strong></p>
+      <p id="standardMinutesTotal" class="hint"></p>
+      <div class="grid two">
+        <label>滞在時間（分）<input id="stayMinutes" type="number" min="1" step="1"></label>
         <label>終了予定<input id="endTime" readonly></label>
       </div>
       <div id="editNotice" class="edit-notice" hidden>入力一覧のデータを修正中です。</div>
@@ -48,7 +52,7 @@
         <button id="cancelEditBtn" class="secondary" hidden>修正をやめる</button>
         <button id="clearEntryBtn" class="secondary">入力クリア</button>
       </div>
-      <p id="autoFillStatus" class="hint">メニューを選ぶと標準価格と標準時間が自動入力されます。</p>
+      <p id="autoFillStatus" class="hint">メニューを選ぶと実売上と標準時間合計を初期入力します。滞在時間は実際の時間に修正できます。</p>
     </section>
 
     <section class="card">
@@ -106,6 +110,7 @@
       <p class="hint">GitHub Pagesで開けばJavaScriptが通常実行されるため、チャット内プレビューより安定して動作します。</p>
     </section>
   </main>
+  <script src="visit-data.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

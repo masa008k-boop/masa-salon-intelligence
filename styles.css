@@ -25,3 +25,6 @@ details{margin:10px 0}.file-button input{display:none}
 .menu-actions button:disabled{opacity:.4;cursor:default}
 @media(max-width:680px){.menu-master-row{grid-template-columns:repeat(2,minmax(0,1fr))}.menu-actions{grid-column:1/-1}}
 @media(max-width:680px){.row-actions{flex-direction:column}.row-actions button{width:100%}}
+
+.visit-item{border:1px solid var(--line);border-radius:10px;padding:10px;margin:10px 0;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:8px;white-space:normal}.visit-item .hint{grid-column:1/-1}.visit-item label{min-width:0}.visit-item button:disabled{opacity:.4}.visit-edit{white-space:normal;min-width:280px}.visit-edit input,.visit-edit select{min-width:0}@media(max-width:680px){.visit-item{grid-template-columns:minmax(0,1fr)}.visit-edit .grid.two{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:680px){.visit-edit > *{max-width:calc(100vw - 78px)}}
